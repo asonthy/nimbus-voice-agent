@@ -9,6 +9,16 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Dependencies / build output (none needed for this static site)
+# Dependencies / build output
 node_modules/
 __pycache__/
+*.pyc
+*.pyo
+
+# Python virtualenv
+backend/.venv/
+
+# Generated FAISS index and PCA coords (rebuilt automatically on first run)
+backend/data/faiss.index
+backend/data/chunks_meta.json
+backend/data/pca_coords.json

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nimbus · The cloud suite to run your whole business</title>
-  <meta name="description" content="Nimbus is a fictitious all-in-one business software suite built for the Voice Agents bootcamp." />
+  <title>Nimbus · Voice Agent Playground</title>
+  <meta name="description" content="Configure and interact with the Nimbus voice agent." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -16,9 +16,8 @@
   <main id="app"></main>
   <script type="module">
     import { bootstrap } from "./assets/app.js";
-    import { renderHome } from "./assets/render.js";
-    bootstrap("", renderHome);
+    import { renderPlayground } from "./assets/playground/playground.js";
+    bootstrap("", renderPlayground);
   </script>
-  <script type="module" src="./assets/voice-widget.js"></script>
 </body>
 </html>

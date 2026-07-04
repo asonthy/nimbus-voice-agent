@@ -1,0 +1,28 @@
+# Global Pricing Summary
+Source: pricing
+
+All Nimbus Products — Starting Prices (monthly vs annual):
+- Nimbus CRM (Sales & CRM): from $15/user/mo ($12/user/mo annual)
+- Nimbus Leads (Sales & CRM): from $25/user/mo ($20/user/mo annual)
+- Nimbus Quote (Sales & CRM): from $20/user/mo ($16/user/mo annual)
+- Nimbus Campaigns (Marketing): from $15/user/mo ($12/user/mo annual)
+- Nimbus Social (Marketing): from $20/user/mo ($16/user/mo annual)
+- Nimbus Sites (Marketing): from $25/user/mo ($20/user/mo annual)
+- Nimbus Books (Finance & Accounting): from $15/user/mo ($12/user/mo annual)
+- Nimbus Invoice (Finance & Accounting): from $10/user/mo ($8/user/mo annual)
+- Nimbus Expense (Finance & Accounting): from $15/user/mo ($12/user/mo annual)
+- Nimbus People (HR & People): from $10/user/mo ($8/user/mo annual)
+- Nimbus Recruit (HR & People): from $25/user/mo ($20/user/mo annual)
+- Nimbus Payroll (HR & People): from $20/user/mo ($16/user/mo annual)
+- Nimbus Desk (Customer Support): from $20/user/mo ($16/user/mo annual)
+- Nimbus Chat (Customer Support): from $15/user/mo ($12/user/mo annual)
+- Nimbus Knowledge (Customer Support): from $15/user/mo ($12/user/mo annual)
+- Nimbus Projects (Projects & Collaboration): from $10/user/mo ($8/user/mo annual)
+- Nimbus Docs (Projects & Collaboration): from $8/user/mo ($6/user/mo annual)
+- Nimbus Boards (Projects & Collaboration): from $12/user/mo ($9/user/mo annual)
+- Nimbus Analytics (Analytics & BI): from $15/user/mo ($12/user/mo annual)
+- Nimbus Dashboards (Analytics & BI): from $10/user/mo ($8/user/mo annual)
+- Nimbus DataPipe (Analytics & BI): from $25/user/mo ($20/user/mo annual)
+- Nimbus Vault (IT & Security): from $10/user/mo ($8/user/mo annual)
+- Nimbus SSO (IT & Security): from $15/user/mo ($12/user/mo annual)
+- Nimbus Endpoint (IT & Security): from $20/user/mo ($16/user/mo annual)
