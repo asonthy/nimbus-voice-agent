@@ -12,6 +12,7 @@ from backend.routers import asr as asr_router
 from backend.routers import llm as llm_router
 from backend.routers import tts as tts_router
 from backend.routers import ws as ws_router
+from backend.routers import config as config_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,6 +35,7 @@ app.include_router(asr_router.router, prefix="/api")
 app.include_router(llm_router.router, prefix="/api")
 app.include_router(tts_router.router, prefix="/api")
 app.include_router(ws_router.router, prefix="/api")
+app.include_router(config_router.router, prefix="/api")
 
 
 @app.get("/api/health")
