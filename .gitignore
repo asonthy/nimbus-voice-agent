@@ -22,3 +22,6 @@ backend/.venv/
 backend/data/faiss.index
 backend/data/chunks_meta.json
 backend/data/pca_coords.json
+
+# Local dev server logs (from restart.sh)
+.logs/
