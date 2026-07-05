@@ -34,12 +34,15 @@ export class WsSession {
 
   async connect() {
     return new Promise((resolve, reject) => {
+      console.debug("[ws] connecting to", this._url);
       this._ws = new WebSocket(this._url);
       this._ws.onopen = () => {
+        console.debug("[ws] open, sending config", this._config);
         this._ws.send(JSON.stringify({ type: "config", data: this._config }));
         resolve();
       };
-      this._ws.onerror = reject;
+      this._ws.onerror = (e) => { console.error("[ws] error", e); reject(e); };
+      this._ws.onclose = (e) => console.debug("[ws] closed", e.code, e.reason);
       this._ws.onmessage = (e) => this._onMessage(JSON.parse(e.data));
     });
   }
@@ -65,6 +68,7 @@ export class WsSession {
     });
 
     this._vad.addEventListener("voice_start", () => {
+      console.debug("[voice] voice_start");
       if (this._ttsPlaying) {
         this._interruptTts();
         this._ws?.send(JSON.stringify({ type: "interrupt" }));
@@ -72,6 +76,7 @@ export class WsSession {
     });
 
     this._vad.addEventListener("voice_end", () => {
+      console.debug("[voice] voice_end -> sending vad_end");
       this._ws?.send(JSON.stringify({ type: "vad_end" }));
     });
 
@@ -94,6 +99,7 @@ export class WsSession {
   }
 
   _onMessage(msg) {
+    console.debug("[ws] recv", msg.type, msg);
     switch (msg.type) {
       case "asr_partial":
         this._cb.onTranscript?.(msg.text, false);

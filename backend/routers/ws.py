@@ -23,6 +23,7 @@ import asyncio
 import base64
 import json
 import time
+import traceback
 import uuid
 from typing import Optional
 
@@ -101,6 +102,16 @@ async def ws_endpoint(ws: WebSocket):
 
 
 async def _run_pipeline(session: Session, audio: bytes):
+    try:
+        await _run_pipeline_inner(session, audio)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        await session.send({"type": "error", "message": f"Pipeline error: {e}"})
+
+
+async def _run_pipeline_inner(session: Session, audio: bytes):
     lap = {}
     t_start = time.perf_counter()
 
