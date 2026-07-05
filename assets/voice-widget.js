@@ -53,7 +53,7 @@ function mount() {
       <input class="inp" id="vp-text" placeholder="Or type a question…" style="flex:1;font-size:.85rem;" />
       <button class="btn btn-primary btn-sm" id="vp-send">Send</button>
     </div>
-    <a class="vp-link muted" href="playground.html">Open full playground →</a>`;
+    <a class="vp-link muted" href="playground/playground.html">Open full playground →</a>`;
   document.body.appendChild(panel);
 
   // Toggle

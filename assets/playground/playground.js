@@ -3,12 +3,12 @@
  * Imported by playground.html.
  */
 
-import { get, set, setMany, getConfig } from "./config-store.js";
+import { get, set, getConfig } from "./config-store.js";
 import * as ragViz from "./rag-viz.js";
 import { drawChart, recordTurn, getHistory } from "./latency.js";
 
-/* ─── Public entry point (called by playground.html) ─── */
-export async function renderPlayground(catalog) {
+/* ─── Public entry point (called by playground.html / voice.html / rag.html) ─── */
+export async function renderPlayground(catalog, initialPage = "page-keys") {
   const app = document.getElementById("app");
 
   // Hero
@@ -30,7 +30,7 @@ export async function renderPlayground(catalog) {
   _renderPages(main, catalog);
 
   // Activate first page
-  _activatePage("page-keys");
+  _activatePage(initialPage);
 }
 
 /* ─── Hero ─── */
