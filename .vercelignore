@@ -1,0 +1,11 @@
+# Only the static site (html, assets/, data/) is deployed to Vercel.
+# The backend (FastAPI + WebSocket + RAG) needs a persistent server and
+# lives on Railway instead — see README.md.
+backend/
+context/
+.claude/
+.logs/
+.git/
+.venv/
+restart.sh
+voice-agent-input.txt
