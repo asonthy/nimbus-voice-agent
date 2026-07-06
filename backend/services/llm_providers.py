@@ -127,11 +127,12 @@ async def stream_openai(
     max_tokens: int,
     tools_enabled: list[str],
     api_key: Optional[str],
+    temperature: float = 0.7,
 ) -> AsyncGenerator[dict, None]:
     import openai
     client = openai.AsyncOpenAI(api_key=_key("OPENAI_API_KEY", api_key))
     tools = _openai_tools(tools_enabled)
-    kwargs = dict(model=model, messages=messages, max_tokens=max_tokens, stream=True)
+    kwargs = dict(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature, stream=True)
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
@@ -169,6 +170,7 @@ async def stream_gemini(
     max_tokens: int,
     tools_enabled: list[str],
     api_key: Optional[str],
+    temperature: float = 0.7,
 ) -> AsyncGenerator[dict, None]:
     import google.generativeai as genai
     genai.configure(api_key=_key("GOOGLE_API_KEY", api_key))
@@ -185,7 +187,7 @@ async def stream_gemini(
     chat = gemini_model.start_chat(history=history[:-1] if history else [])
     response = await chat.send_message_async(
         user_msg["parts"][0],
-        generation_config=genai.types.GenerationConfig(max_output_tokens=max_tokens),
+        generation_config=genai.types.GenerationConfig(max_output_tokens=max_tokens, temperature=temperature),
         stream=True,
     )
     async for chunk in response:
@@ -199,6 +201,7 @@ async def stream_anthropic(
     max_tokens: int,
     tools_enabled: list[str],
     api_key: Optional[str],
+    temperature: float = 0.7,
 ) -> AsyncGenerator[dict, None]:
     import anthropic
     client = anthropic.AsyncAnthropic(api_key=_key("ANTHROPIC_API_KEY", api_key))
@@ -216,7 +219,7 @@ async def stream_anthropic(
         if t in TOOL_SCHEMAS
     ]
 
-    kwargs = dict(model=model, max_tokens=max_tokens, system=system, messages=conv, stream=True)
+    kwargs = dict(model=model, max_tokens=max_tokens, system=system, messages=conv, temperature=temperature, stream=True)
     if anthropic_tools:
         kwargs["tools"] = anthropic_tools
 
