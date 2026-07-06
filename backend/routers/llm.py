@@ -1,13 +1,24 @@
 import json
 import time
-import uuid
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 router = APIRouter()
+
+CONTEXT_MD_PATH = Path(__file__).parent.parent.parent / "context" / "context.md"
+_context_cache: Optional[str] = None
+
+
+def _read_context() -> str:
+    """Full corpus text for RAGless mode (see PLAN.md, Phase 0)."""
+    global _context_cache
+    if _context_cache is None:
+        _context_cache = CONTEXT_MD_PATH.read_text() if CONTEXT_MD_PATH.exists() else ""
+    return _context_cache
 
 
 class LlmRequest(BaseModel):
@@ -17,10 +28,12 @@ class LlmRequest(BaseModel):
     system_prompt: str = ""
     response_length: str = "medium"
     use_rag: bool = True
+    use_context: bool = False
     top_k: int = 5
     rerank: bool = False
     embedding_model: str = "all-MiniLM-L6-v2"
     tools_enabled: list[str] = []
+    temperature: float = 0.7
     streaming: bool = False
     session_id: Optional[str] = None
 
@@ -39,8 +52,7 @@ async def llm_batch(
     keys = {"openai": x_openai_key, "google": x_google_key, "anthropic": x_anthropic_key}
 
     rag_context, rag_latency = await _maybe_rag(req)
-
-    messages = _build_messages(req.messages, req.system_prompt, rag_context)
+    messages = _build_messages(req, rag_context)
     max_tokens = LENGTH_TOKENS.get(req.response_length, 300)
 
     from backend.services.llm_providers import get_streamer
@@ -52,7 +64,7 @@ async def llm_batch(
     full_text = ""
     tool_calls = []
 
-    async for event in streamer(messages, req.model, max_tokens, req.tools_enabled, api_key):
+    async for event in streamer(messages, req.model, max_tokens, req.tools_enabled, api_key, req.temperature):
         if event["type"] == "token":
             full_text += event["data"]
         elif event["type"] == "tool_call":
@@ -67,59 +79,43 @@ async def llm_batch(
     }
 
 
-@router.get("/llm/stream")
+@router.post("/llm/stream")
 async def llm_stream(
-    request: Request,
-    provider: str = "openai",
-    model: str = "gpt-4o-mini",
-    session_id: Optional[str] = None,
-    system_prompt: str = "",
-    response_length: str = "medium",
-    use_rag: bool = False,
-    top_k: int = 5,
-    rerank: bool = False,
-    embedding_model: str = "all-MiniLM-L6-v2",
-    tools_enabled: str = "",
+    req: LlmRequest,
     x_openai_key: Optional[str] = Header(None),
     x_google_key: Optional[str] = Header(None),
     x_anthropic_key: Optional[str] = Header(None),
 ):
     keys = {"openai": x_openai_key, "google": x_google_key, "anthropic": x_anthropic_key}
-    tools_list = [t for t in tools_enabled.split(",") if t]
 
-    # Reconstruct a minimal LlmRequest-like from query params
-    # In practice the WS router builds full messages; this endpoint is for playground text mode
-    class _Req:
-        pass
+    rag_context, rag_latency = await _maybe_rag(req)
+    messages = _build_messages(req, rag_context)
+    max_tokens = LENGTH_TOKENS.get(req.response_length, 300)
 
-    r = _Req()
-    r.provider = provider
-    r.model = model
-    r.session_id = session_id or str(uuid.uuid4())
-    r.system_prompt = system_prompt
-    r.response_length = response_length
-    r.use_rag = use_rag
-    r.top_k = top_k
-    r.rerank = rerank
-    r.embedding_model = embedding_model
-    r.tools_enabled = tools_list
-    r.messages = []
-
-    from backend.services.llm_providers import get_streamer, LENGTH_TOKENS
-    streamer = get_streamer(provider)
-    api_key = _pick_key(provider, keys)
-    max_tokens = LENGTH_TOKENS.get(response_length, 300)
+    from backend.services.llm_providers import get_streamer
+    streamer = get_streamer(req.provider)
+    api_key = _pick_key(req.provider, keys)
 
     async def _generate():
         t0 = time.perf_counter()
-        total_tokens = 0
-        async for event in streamer(r.messages, model, max_tokens, tools_list, api_key):
+        if not streamer:
+            yield f"data: {json.dumps({'type': 'error', 'data': f'Unknown provider: {req.provider}'})}\n\n"
+            return
+        async for event in streamer(messages, req.model, max_tokens, req.tools_enabled, api_key, req.temperature):
             yield f"data: {json.dumps(event)}\n\n"
-            total_tokens += 1
-        done_event = {"type": "done", "data": {"total_latency_ms": int((time.perf_counter() - t0) * 1000)}}
+        done_event = {
+            "type": "done",
+            "data": {"latency_ms": int((time.perf_counter() - t0) * 1000), "rag_latency_ms": rag_latency},
+        }
         yield f"data: {json.dumps(done_event)}\n\n"
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
+@router.get("/tools")
+async def list_tools():
+    from backend.services.llm_providers import TOOL_SCHEMAS
+    return {"tools": [{"name": t["name"], "description": t["description"]} for t in TOOL_SCHEMAS.values()]}
 
 
 async def _maybe_rag(req: LlmRequest) -> tuple[str, int]:
@@ -137,11 +133,13 @@ async def _maybe_rag(req: LlmRequest) -> tuple[str, int]:
     return context, lat
 
 
-def _build_messages(messages: list[dict], system_prompt: str, rag_context: str) -> list[dict]:
-    system = system_prompt
-    if rag_context:
+def _build_messages(req: LlmRequest, rag_context: str = "") -> list[dict]:
+    system = req.system_prompt
+    if req.use_context:
+        system += f"\n\n--- Nimbus knowledge base ---\n{_read_context()}\n--- End knowledge base ---"
+    elif rag_context:
         system += f"\n\n--- Retrieved context ---\n{rag_context}\n--- End context ---"
-    return [{"role": "system", "content": system}] + messages
+    return [{"role": "system", "content": system}] + req.messages
 
 
 def _pick_key(provider: str, keys: dict) -> Optional[str]:

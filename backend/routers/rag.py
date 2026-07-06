@@ -37,11 +37,18 @@ async def rag_query(req: RagQueryRequest):
 
 @router.get("/rag/vectors")
 async def rag_vectors():
-    from backend.services.embedder import get_pca_coords
+    from backend.services.embedder import get_pca_coords, get_index, EMBEDDING_PROFILE
     data = get_pca_coords()
     if data is None:
         raise HTTPException(503, "PCA coordinates not available — run build first")
-    return data
+    idx = get_index()
+    return {
+        **data,
+        "profile": EMBEDDING_PROFILE,
+        "dim": idx.d if idx is not None else None,
+        "chunks": len(data.get("points", [])),
+        "model": "text-embedding-3-small" if EMBEDDING_PROFILE == "light" else "all-MiniLM-L6-v2",
+    }
 
 
 @router.get("/rag/rebuild")

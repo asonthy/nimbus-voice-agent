@@ -29,5 +29,7 @@ async def tts(
     keys = {"openai": x_openai_key, "gemini": x_google_key, "elevenlabs": x_eleven_labs_key}
     api_key = keys.get(req.provider)
 
+    t0 = time.perf_counter()
     audio_bytes = await synth(req.text, req.voice, api_key)
-    return Response(content=audio_bytes, media_type="audio/mpeg")
+    ms = int((time.perf_counter() - t0) * 1000)
+    return Response(content=audio_bytes, media_type="audio/mpeg", headers={"X-TTS-Ms": str(ms)})
