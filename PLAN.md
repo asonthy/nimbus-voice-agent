@@ -41,9 +41,11 @@ Full walkthrough (testing steps, debugging tips) is in `README.md`.
    `.../playground/playground.html`, `.../playground/voice.html`,
    `.../playground/rag.html`.
 4. The backend still needs to run somewhere with persistent-process + WebSocket
-   support (Railway — see `railway.json`); once it's deployed, set its URL in
-   the deployed playground's **Keys** page → **Backend URL** (per-browser,
-   via `localStorage`, no rebuild needed).
+   support (Railway — see `railway.json`/`Procfile`); once it's deployed, edit
+   `assets/runtime-config.js` to set `window.NIMBUS_API_BASE` to the Railway
+   URL (default for every visitor), or just set it per-browser from the
+   deployed playground's **Keys** page → **Backend URL** (`localStorage`,
+   no rebuild needed either way).
 
 ## Scope decisions (locked)
 
@@ -51,11 +53,16 @@ Full walkthrough (testing steps, debugging tips) is in `README.md`.
   all three are implemented and swappable per-session.
 - **Public phone number / telephony: out of scope** (no Twilio). Web + voice in
   the browser only.
-- **Embedding + RAG:** a single profile — `sentence-transformers`
-  (`all-MiniLM-L6-v2`) + FAISS, with an optional cross-encoder rerank pass.
-  No provider-embedding fallback yet (see Open items — this is the one place
-  this repo diverges from a Railway-lightweight setup, since `torch` +
-  `sentence-transformers` ship in the backend image).
+- **Embedding + rerank are a pluggable profile** (`EMBEDDING_PROFILE` env var)
+  so the backend can run light on Railway:
+  - `rich` (default, local): `sentence-transformers` (`all-MiniLM-L6-v2`) +
+    FAISS + cross-encoder rerank (`cross-encoder/ms-marco-MiniLM-L-6-v2`).
+  - `light` (Railway): OpenAI `text-embedding-3-small` + FAISS + LLM rerank
+    (`gpt-4o-mini`). No `torch`/`sentence-transformers` needed at runtime;
+    `backend/requirements-light.txt` drops them from the install entirely.
+  - Same `search()` / `_rerank()` interface either way — the profile only
+    changes what's inside `embed_texts()` and `_rerank()`
+    (`backend/services/embedder.py`, `retriever.py`).
 - **Keys available:** OpenAI, Gemini, ElevenLabs, Anthropic, HF, Railway, Vercel.
 
 ## Stack
@@ -79,6 +86,7 @@ Full walkthrough (testing steps, debugging tips) is in `README.md`.
 ├── context/                          # scraped/authored corpus the RAG index is built from
 ├── assets/
 │   ├── app.js, render.js, styles.css, cart.js, voice-widget.js  # site + landing-page voice widget
+│   ├── runtime-config.js            # sets window.NIMBUS_API_BASE (prod backend URL); edit after deploy
 │   └── playground/
 │       ├── playground.js            # tab-based SPA: Keys, ASR, LLM, RAG, TTS, Tools, VAD, Latency, RAG Viz, Talk
 │       ├── config-store.js          # localStorage-backed config (keys, backend URL, per-stage settings)
@@ -96,11 +104,13 @@ Full walkthrough (testing steps, debugging tips) is in `README.md`.
 │   │   ├── asr_providers.py         # openai (whisper), gemini, elevenlabs
 │   │   ├── llm_providers.py         # openai, gemini, anthropic streaming + tool-call schemas
 │   │   ├── tts_providers.py         # openai, gemini, elevenlabs
-│   │   ├── embedder.py, retriever.py, scraper.py   # chunk/embed/index/retrieve + optional rerank
+│   │   ├── audio_utils.py           # webm -> wav via bundled ffmpeg (imageio-ffmpeg), for Gemini ASR
+│   │   ├── embedder.py, retriever.py, scraper.py   # chunk/embed/index/retrieve + rerank; EMBEDDING_PROFILE-aware
 │   │   └── history.py               # verbatim-N turns + LLM-summarized older turns
 │   ├── data/                        # faiss.index, chunks_meta.json (gitignored, rebuilt on first run)
-│   └── requirements.txt
-├── railway.json, .python-version    # backend deploy config
+│   ├── requirements.txt             # full (rich profile): includes torch/sentence-transformers
+│   └── requirements-light.txt       # light profile: no torch/sentence-transformers/transformers
+├── railway.json, Procfile, .python-version   # backend deploy config (either works; same start command)
 ├── .vercelignore                    # excludes backend/, context/, dev-only files from the Vercel build
 └── restart.sh                       # kills + relaunches backend (uvicorn --reload) + static frontend
 ```
@@ -144,9 +154,11 @@ Cart tools read/write the same shape so the site and the agent stay in sync.
 
 ## Phase 3: RAG — done
 
-- `services/embedder.py` / `retriever.py`: chunk + embed (`all-MiniLM-L6-v2`)
-  + FAISS top-k + optional cross-encoder rerank (`ragRerank` toggle, reranks
-  `top_k * 3` candidates down to `top_k`).
+- `services/embedder.py` / `retriever.py`: chunk + embed + FAISS top-k +
+  optional rerank (`ragRerank` toggle, reranks `top_k * 3` candidates down to
+  `top_k`). Embedding model and rerank strategy both follow `EMBEDDING_PROFILE`
+  (`rich` = MiniLM + cross-encoder locally, `light` = OpenAI embeddings + LLM
+  rerank on Railway) — same interface either way.
 - RAG on/off, top-k, and rerank are all playground-configurable; `rag_ms` is
   reported per turn.
 - **RAG Viz** (`playground/rag.html`): 2D PCA projection of every chunk
@@ -156,6 +168,10 @@ Cart tools read/write the same shape so the site and the agent stay in sync.
 
 - **ASR:** browser (Web Speech API, client-side, standalone test panel only)
   + OpenAI Whisper + Gemini + ElevenLabs (server-side, used by the Talk page).
+  Gemini doesn't accept the browser's webm/opus directly, so it's transcoded
+  to wav first via a bundled ffmpeg binary (`imageio-ffmpeg` — no system
+  package needed; ships a Linux binary so this works on Railway, logs a
+  warning and no-ops on platforms without a matching wheel, e.g. macOS arm64).
 - **TTS:** OpenAI + Gemini + ElevenLabs.
 - **Voice loop over `/api/ws`:** mic → client-side VAD endpointing → `vad_end`
   → ASR → (RAG?) → LLM (stream) → tool loop → TTS → playback. One click starts
@@ -173,9 +189,11 @@ Cart tools read/write the same shape so the site and the agent stay in sync.
   `playground/playground.html`.
 - Deployed: static site + `playground/` on **Vercel** (`.vercelignore` keeps
   the Python backend out of the build); backend on **Railway**
-  (`railway.json` installs `backend/requirements.txt` and runs
-  `uvicorn backend.main:app`). Backend URL is set per-browser via the
-  playground's Keys page (`localStorage`), not baked into the JS.
+  (`railway.json`/`Procfile` install `backend/requirements-light.txt` and run
+  `uvicorn backend.main:app` with `EMBEDDING_PROFILE=light` set in the
+  dashboard). Default backend URL comes from `assets/runtime-config.js`
+  (`window.NIMBUS_API_BASE`, edited once after deploy); anyone can still
+  override it per-browser via the playground's Keys page (`localStorage`).
 
 ---
 
@@ -193,17 +211,16 @@ The **Talk** page shows this inline (`E2E / ASR / LLM / TTS`); the
 ## Out of scope (explicit)
 
 - Public phone number / Twilio telephony.
-- A Railway-lightweight ("no torch") embedding profile — the backend currently
-  always loads `sentence-transformers` + `torch` for RAG, which is the
-  heaviest part of the Railway image (see Open items).
 
 ## Open items / possible next steps
 
-- Add a lighter embedding profile (e.g. OpenAI `text-embedding-3-small`) behind
-  an env var, to shrink the Railway image and cold-start time — currently
-  `torch`/`sentence-transformers` ship unconditionally.
 - The backend has no per-IP rate limiting; fine for a bootcamp demo, not for
   a public deploy with real keys behind it.
 - `backend/routers/config.py`'s `/api/config/keys` endpoint (used previously
   to pre-fill the playground from `backend/.env`) is currently dead code — the
   frontend no longer calls it. Worth removing or repurposing.
+- `imageio-ffmpeg` has no macOS arm64 wheel as of 0.5.1, so Gemini ASR's
+  webm→wav conversion silently no-ops on Apple Silicon dev machines (logged
+  warning at startup, everything else still works). Fine on Railway (Linux);
+  install a system ffmpeg locally and set `IMAGEIO_FFMPEG_EXE` if you need to
+  test Gemini ASR on Apple Silicon.

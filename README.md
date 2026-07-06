@@ -116,25 +116,48 @@ a Vercel function bundle anyway).
 
 ### Backend → Railway
 
-1. Create a new Railway project from this repo. `railway.json` at the repo
-   root tells Railway to install `backend/requirements.txt` and start
+1. Create a new Railway project from this repo. `railway.json` (and the
+   equivalent `Procfile`) tell Railway to install
+   `backend/requirements-light.txt` and start
    `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
 2. Set environment variables in the Railway dashboard (not by uploading
-   `.env` — it's gitignored and shouldn't be committed): `OPENAI_API_KEY`,
-   `GOOGLE_API_KEY`, `ELEVEN_LABS_API`, `ANTHROPIC_API_KEY`, `HF_TOKEN` as
-   needed for the providers you use.
-3. After deploy, Railway gives you a public URL
+   `.env` — it's gitignored and shouldn't be committed):
+   - `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `ELEVEN_LABS_API`, `ANTHROPIC_API_KEY`,
+     `HF_TOKEN` as needed for the providers you use.
+   - `EMBEDDING_PROFILE=light` — switches RAG from local
+     `sentence-transformers`/cross-encoder (the `rich` default, used locally)
+     to OpenAI `text-embedding-3-small` embeddings + LLM-based rerank (no
+     `torch` needed at runtime). `requirements-light.txt` correspondingly
+     drops `torch`/`sentence-transformers`/`transformers` from the install —
+     keeps the Railway image small and cold start fast. Leave this var unset
+     to run `rich` (e.g. if you switch the install command back to
+     `requirements.txt`).
+3. ffmpeg is bundled via the `imageio-ffmpeg` pip package (no system package
+   needed) — used to transcode browser audio to a format Gemini ASR accepts.
+   It ships a Linux binary, so this works on Railway out of the box; on
+   platforms without a matching wheel (e.g. macOS arm64) the backend logs a
+   warning and keeps running — only Gemini ASR is affected.
+4. After deploy, Railway gives you a public URL
    (`https://<service>.up.railway.app`). CORS is already open (`allow_origins:
    ["*"]"` in `backend/main.py`), and the WS client upgrades `https://` to
    `wss://` automatically.
 
 ### Wiring frontend → backend in production
 
-The playground's default `backendUrl` is `http://localhost:8000` (for local
-dev). Once your Railway backend is live, open the deployed playground's
-**Keys** page and set **Backend URL** to your Railway URL — it's saved to
-`localStorage` per browser, so this is a one-time step per device, not a code
-change.
+`assets/runtime-config.js` sets `window.NIMBUS_API_BASE`, read by both the
+playground (`config-store.js`) and the landing-page widget
+(`voice-widget.js`) as their default backend URL — it's included on
+`index.html` and all three `playground/*.html` pages. After your first
+Railway deploy, edit that one file to your Railway URL:
+
+```js
+window.NIMBUS_API_BASE = "https://<service>.up.railway.app";
+```
+
+Left as the `REPLACE-ME` placeholder, everything falls back to
+`http://localhost:8000` for local dev. This only sets the *default* — anyone
+can still override it per-browser from the playground's **Keys** page
+(`localStorage`), no redeploy needed.
 
 ## Build a voice agent on top of it
 
