@@ -7,6 +7,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+# Make the bundled ffmpeg binary (imageio-ffmpeg) discoverable on PATH — no
+# system ffmpeg package required on hosts with a matching platform wheel
+# (e.g. Railway/Linux). Some platforms (e.g. macOS arm64) have no bundled
+# binary; that's fine locally — only Gemini ASR needs it, and it's looked up
+# lazily there, so we just skip the PATH tweak rather than fail startup.
+try:
+    import imageio_ffmpeg
+    os.environ["PATH"] = os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe()) + os.pathsep + os.environ.get("PATH", "")
+except Exception as e:
+    print(f"imageio-ffmpeg binary unavailable on this platform ({e}); Gemini ASR will fail until ffmpeg is installed")
+
 from backend.routers import rag as rag_router
 from backend.routers import asr as asr_router
 from backend.routers import llm as llm_router

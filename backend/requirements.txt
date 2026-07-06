@@ -18,5 +18,8 @@ torch>=2.5.0
 scikit-learn==1.5.2
 numpy==2.1.3
 
+# Audio format conversion (bundled ffmpeg binary, no system package needed)
+imageio-ffmpeg==0.5.1
+
 # Async helpers
 aiofiles==24.1.0

@@ -34,11 +34,15 @@ async def transcribe_openai(audio_bytes: bytes, language: str, api_key: str | No
 
 
 async def transcribe_gemini(audio_bytes: bytes, language: str, api_key: str | None) -> dict:
+    import asyncio
     import google.generativeai as genai
+    from backend.services.audio_utils import webm_to_wav
     t0 = time.perf_counter()
     genai.configure(api_key=_key("GOOGLE_API_KEY", api_key))
     model = genai.GenerativeModel("gemini-1.5-flash")
-    audio_part = {"mime_type": "audio/webm", "data": base64.b64encode(audio_bytes).decode()}
+    # Gemini doesn't accept webm directly — transcode to wav first.
+    wav_bytes = await asyncio.to_thread(webm_to_wav, audio_bytes)
+    audio_part = {"mime_type": "audio/wav", "data": base64.b64encode(wav_bytes).decode()}
     result = await model.generate_content_async(
         ["Transcribe the following audio accurately:", audio_part]
     )
