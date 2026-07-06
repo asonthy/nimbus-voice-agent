@@ -1,0 +1,26 @@
+# Same as requirements.txt, minus torch/sentence-transformers/transformers.
+# Used when EMBEDDING_PROFILE=light (OpenAI embeddings + LLM rerank instead
+# of local sentence-transformers models) — keeps the Railway image small and
+# avoids loading multi-hundred-MB model weights at cold start.
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-dotenv==1.0.1
+httpx==0.27.2
+python-multipart==0.0.12
+
+# AI providers
+openai==1.55.3
+google-generativeai==0.8.3
+anthropic==0.40.0
+elevenlabs==1.9.0
+
+# RAG (embeddings via OpenAI API instead of local models)
+faiss-cpu>=1.9.0
+scikit-learn==1.5.2
+numpy==2.1.3
+
+# Audio format conversion (bundled ffmpeg binary, no system package needed)
+imageio-ffmpeg==0.5.1
+
+# Async helpers
+aiofiles==24.1.0

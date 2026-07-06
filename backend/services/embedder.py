@@ -4,6 +4,7 @@ Also precomputes 2D PCA coordinates for the scatter plot.
 """
 
 import json
+import os
 import pickle
 from pathlib import Path
 from typing import Optional
@@ -17,6 +18,12 @@ DATA_DIR.mkdir(exist_ok=True)
 INDEX_PATH = DATA_DIR / "faiss.index"
 META_PATH = DATA_DIR / "chunks_meta.json"
 PCA_PATH = DATA_DIR / "pca_coords.json"
+
+# "rich" (default, local): sentence-transformers MiniLM — free, no API calls,
+#   best for the clustering visualization.
+# "light" (Railway): OpenAI text-embedding-3-small — no torch/sentence-
+#   transformers needed at runtime, smaller image, faster cold start.
+EMBEDDING_PROFILE = os.environ.get("EMBEDDING_PROFILE", "rich")
 
 _index = None
 _chunks_meta: list[dict] = []
@@ -33,7 +40,18 @@ def _get_embedder(model_name: str = "all-MiniLM-L6-v2"):
     return _embedder
 
 
+def _embed_texts_openai(texts: list[str]) -> np.ndarray:
+    import openai
+    client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+    resp = client.embeddings.create(model="text-embedding-3-small", input=texts)
+    vecs = np.array([d.embedding for d in resp.data], dtype=np.float32)
+    vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+    return vecs
+
+
 def embed_texts(texts: list[str], model_name: str = "all-MiniLM-L6-v2") -> np.ndarray:
+    if EMBEDDING_PROFILE == "light":
+        return _embed_texts_openai(texts)
     model = _get_embedder(model_name)
     vecs = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
     return np.array(vecs, dtype=np.float32)

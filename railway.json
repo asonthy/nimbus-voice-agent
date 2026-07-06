@@ -5,7 +5,7 @@
     "nixpacksPlan": {
       "phases": {
         "install": {
-          "cmds": ["pip install -r backend/requirements.txt"]
+          "cmds": ["pip install -r backend/requirements-light.txt"]
         }
       }
     }
