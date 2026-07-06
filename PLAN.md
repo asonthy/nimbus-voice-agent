@@ -67,14 +67,28 @@ Full walkthrough (testing steps, debugging tips) is in `README.md`.
 
 ## Stack
 
-- **Backend:** Python + FastAPI (`backend/`) on Railway. One WebSocket
-  (`/api/ws`) carries the streaming voice loop; REST (`/api/asr`, `/api/llm`,
-  `/api/tts`, `/api/rag`) covers standalone per-stage testing. Per-stage timing
-  baked into every WS turn.
+- **Backend:** Python + FastAPI (`backend/`) on Railway. Two ways to reach it:
+  a WebSocket (`/api/ws`) carrying a server-orchestrated streaming voice loop,
+  and a stateless REST surface (`/api/asr`, `/api/llm[/stream]`, `/api/tts`,
+  `/api/rag/*`, `/api/tools`) that the playground pages orchestrate themselves
+  turn-by-turn. Per-stage timing on both paths.
 - **Frontend:** the existing static site (unchanged catalog pages) plus a
-  `playground/` folder with three entry pages, deployed on Vercel.
+  `playground/` folder with three standalone pages, deployed on Vercel.
 - **Vector store:** FAISS (local file index under `backend/data/`), built from
   `context/` on first run.
+
+**Two parallel voice implementations, by design:**
+1. **`/api/ws`** — mic → client VAD (`vad.js`) → one WS message per utterance →
+   server runs ASR → RAG → LLM → tools → TTS and streams events back. Used
+   only by the landing page's floating "Talk to Nimbus" widget
+   (`voice-widget.js` + `ws-client.js`), where a lightweight always-on session
+   is what you want.
+2. **REST, client-orchestrated** — `playground/voice.html` (`voice.js`) drives
+   the same stages as discrete calls (`/api/asr` → `/api/llm[/stream]` →
+   `/api/tts`), managing conversation history and the tool-call round-trip
+   itself in the browser, plus its own VAD/MediaRecorder/barge-in logic. This
+   is the reference-matched design (see Repository layout) and is what you get
+   full pipeline-stage control and the TTFA latency pie from.
 
 ## Repository layout (as built)
 
@@ -85,28 +99,28 @@ Full walkthrough (testing steps, debugging tips) is in `README.md`.
 ├── data/catalog.json                # single source of truth for the catalog
 ├── context/                          # scraped/authored corpus the RAG index is built from
 ├── assets/
-│   ├── app.js, render.js, styles.css, cart.js, voice-widget.js  # site + landing-page voice widget
+│   ├── app.js, render.js, styles.css, cart.js   # static site
+│   ├── voice-widget.js              # landing-page floating widget, uses ws-client.js (the /api/ws path)
 │   ├── runtime-config.js            # sets window.NIMBUS_API_BASE (prod backend URL); edit after deploy
 │   └── playground/
-│       ├── playground.js            # tab-based SPA: Keys, ASR, LLM, RAG, TTS, Tools, VAD, Latency, RAG Viz, Talk
-│       ├── config-store.js          # localStorage-backed config (keys, backend URL, per-stage settings)
 │       ├── ws-client.js             # WsSession: mic -> MediaRecorder -> WS -> ASR/LLM/TTS playback
-│       ├── vad.js                   # client-side voice-activity endpointing
-│       ├── rag-viz.js, latency.js, tools.js
-├── playground/
-│   ├── playground.html              # full control panel (all tabs, default = Keys)
-│   ├── voice.html                   # same app, opens straight to the Talk tab
-│   └── rag.html                     # same app, opens straight to the RAG Viz tab
+│       ├── vad.js                   # client-side voice-activity endpointing (used by ws-client.js)
+│       └── tools.js                 # client-side tool execution against nimbus_cart; used by ws-client.js
+│                                       AND by playground.js/voice.js (the REST path)
+├── playground/                      # three standalone pages (own CSS/JS each, no shared SPA)
+│   ├── playground.html, playground.css, playground.js   # text chat: batch/stream, tools, RAG, latency
+│   ├── voice.html, voice.css, voice.js                   # full voice loop (REST-orchestrated, see Stack)
+│   └── rag.html, rag.css, rag.js                         # vector scatter + live query highlight
 ├── backend/
 │   ├── main.py                      # FastAPI app, CORS, lifespan (loads/builds FAISS index)
 │   ├── routers/                     # asr.py, llm.py, tts.py, rag.py, ws.py, config.py
 │   ├── services/
 │   │   ├── asr_providers.py         # openai (whisper), gemini, elevenlabs
-│   │   ├── llm_providers.py         # openai, gemini, anthropic streaming + tool-call schemas
+│   │   ├── llm_providers.py         # openai, gemini, anthropic streaming + tool-call schemas + TOOL_SCHEMAS
 │   │   ├── tts_providers.py         # openai, gemini, elevenlabs
 │   │   ├── audio_utils.py           # webm -> wav via bundled ffmpeg (imageio-ffmpeg), for Gemini ASR
 │   │   ├── embedder.py, retriever.py, scraper.py   # chunk/embed/index/retrieve + rerank; EMBEDDING_PROFILE-aware
-│   │   └── history.py               # verbatim-N turns + LLM-summarized older turns
+│   │   └── history.py               # verbatim-N turns + LLM-summarized older turns (used by the WS path only)
 │   ├── data/                        # faiss.index, chunks_meta.json (gitignored, rebuilt on first run)
 │   ├── requirements.txt             # full (rich profile): includes torch/sentence-transformers
 │   └── requirements-light.txt       # light profile: no torch/sentence-transformers/transformers
@@ -118,6 +132,9 @@ Full walkthrough (testing steps, debugging tips) is in `README.md`.
 The static site's cart (`assets/cart.js`, localStorage key `nimbus_cart`, item
 shape `{product_id, product_name, tier, seats, price}`) is the shared cart.
 Cart tools read/write the same shape so the site and the agent stay in sync.
+The REST path (`playground.js`/`voice.js`) has no server-side session, so it
+manages conversation history and tool-call follow-ups (execute client-side →
+append result → re-call the LLM) itself, in the browser.
 
 ---
 
@@ -131,82 +148,100 @@ Cart tools read/write the same shape so the site and the agent stay in sync.
 ## Phase 1: LLM core + text/turn pipeline — done
 
 - Provider adapters for OpenAI, Gemini, and Anthropic, unified behind
-  `get_streamer(provider)` yielding `{type: "token"|"tool_call", ...}` events.
-- **Streaming mode** over the WebSocket (`llm_token` events); response length
-  (low/medium/high) maps to `max_tokens`.
-- **System prompt** editable from the **LLM** tab.
-- **History:** last *N* turns verbatim (slider), older turns summarized via a
-  cheap `gpt-4o-mini` call (`services/history.py:maybe_compress`).
-- Per-turn latency (`asr`, `rag`, `llm`, `tts`, `total`) sent as `latency_report`.
+  `get_streamer(provider)` yielding `{type: "token"|"tool_call", ...}` events,
+  with a `temperature` param threaded through to all three.
+- `/api/llm` (batch) and `/api/llm/stream` (SSE) are stateless — callers pass
+  the full `messages` array each time. `playground.html` (`playground.js`)
+  manages that array client-side: a **Verbatim history** slider truncates to
+  the last *N* messages (no server-side summarization on this path — that's
+  a `history.py`-only feature, used by the WS path).
+- **Streaming vs batch** compared side-by-side (TTFT + total) on the same page.
+- **Knowledge source**: RAG (top-k retrieval), RAGless (`use_context` — the
+  full `context/context.md` injected), or None.
+- **System prompt** and **temperature** both editable from the page.
 
 ## Phase 2: Tools — done
 
-11 tools, individually toggleable from the **Tools** tab: `get_cart_total`,
-`add_to_cart`, `remove_from_cart`, `clear_cart`, `checkout_item`,
-`checkout_all`, `get_pricing_annual`, `calculate_savings`, `sort_products`,
-`get_top_k_expensive`, `get_cart_items`.
+11 tools: `get_cart_total`, `add_to_cart`, `remove_from_cart`, `clear_cart`,
+`checkout_item`, `checkout_all`, `get_pricing_annual`, `calculate_savings`,
+`sort_products`, `get_top_k_expensive`, `get_cart_items` — individually
+toggleable, listed via `GET /api/tools` (serializes `llm_providers.TOOL_SCHEMAS`,
+one definition shared by both the WS and REST paths).
 
-- Tool schemas defined once (`llm_providers.TOOL_SCHEMAS`) and translated
-  per-provider (OpenAI function-calling shape, Anthropic tool shape).
-- Tool execution happens **client-side** (`assets/playground/tools.js`,
-  dispatched over the WS `tool_call`/`tool_result` messages) against the same
-  `nimbus_cart` the site uses — so cart state stays in sync with the page.
+- Tool schemas defined once and translated per-provider (OpenAI function-
+  calling shape, Anthropic tool shape).
+- Tool execution happens **client-side** (`assets/playground/tools.js`)
+  against `nimbus_cart`, on both paths:
+  - WS: dispatched over the `tool_call`/`tool_result` messages.
+  - REST: `playground.js`/`voice.js` execute the tool, append the result as a
+    message, and re-call `/api/llm[/stream]` for the final reply — since
+    there's no session on this path, that round-trip is orchestrated in JS.
 
 ## Phase 3: RAG — done
 
 - `services/embedder.py` / `retriever.py`: chunk + embed + FAISS top-k +
-  optional rerank (`ragRerank` toggle, reranks `top_k * 3` candidates down to
-  `top_k`). Embedding model and rerank strategy both follow `EMBEDDING_PROFILE`
-  (`rich` = MiniLM + cross-encoder locally, `light` = OpenAI embeddings + LLM
-  rerank on Railway) — same interface either way.
-- RAG on/off, top-k, and rerank are all playground-configurable; `rag_ms` is
+  optional rerank (reranks `top_k * 3` candidates down to `top_k`). Embedding
+  model and rerank strategy both follow `EMBEDDING_PROFILE` (`rich` = MiniLM +
+  cross-encoder locally, `light` = OpenAI embeddings + LLM rerank on Railway)
+  — same interface either way. Each result carries its absolute chunk `id`.
+- RAG on/off, top-k, and rerank are all playground-configurable; latency is
   reported per turn.
-- **RAG Viz** (`playground/rag.html`): 2D PCA projection of every chunk
-  vector, live query overlay + nearest-k highlight, index rebuild button.
+- **`playground/rag.html`** (`rag.js`): 2D PCA scatter of every chunk vector
+  (colored by source category — products/pricing/faqs/policies/company),
+  live query overlay with ranked connector lines to the retrieved points,
+  hover-to-read-chunk, index rebuild button.
 
 ## Phase 4: Voice (ASR + TTS + the loop) — done
 
-- **ASR:** browser (Web Speech API, client-side, standalone test panel only)
-  + OpenAI Whisper + Gemini + ElevenLabs (server-side, used by the Talk page).
-  Gemini doesn't accept the browser's webm/opus directly, so it's transcoded
-  to wav first via a bundled ffmpeg binary (`imageio-ffmpeg` — no system
-  package needed; ships a Linux binary so this works on Railway, logs a
-  warning and no-ops on platforms without a matching wheel, e.g. macOS arm64).
-- **TTS:** OpenAI + Gemini + ElevenLabs.
-- **Voice loop over `/api/ws`:** mic → client-side VAD endpointing → `vad_end`
-  → ASR → (RAG?) → LLM (stream) → tool loop → TTS → playback. One click starts
-  a continuous session; VAD auto-detects each utterance boundary, so no
-  per-turn clicking is needed.
-- **Barge-in / interrupt:** speaking during TTS playback stops it immediately
-  and appends `[cancelled by the user]` to history.
-- **Latency dashboard** (**Latency** tab): stage breakdown per turn, history
-  across turns.
+- **ASR:** browser (Web Speech API, client-side) + OpenAI Whisper + Gemini +
+  ElevenLabs (server-side). Gemini doesn't accept the browser's webm/opus
+  directly, so it's transcoded to wav first via a bundled ffmpeg binary
+  (`imageio-ffmpeg` — no system package needed; ships a Linux binary so this
+  works on Railway, logs a warning and no-ops on platforms without a matching
+  wheel, e.g. macOS arm64).
+- **TTS:** OpenAI + Gemini + ElevenLabs; `/api/tts` reports synth time via an
+  `X-TTS-Ms` header.
+- **`playground/voice.html`** (`voice.js`) is the full voice loop: mic →
+  client VAD/MediaRecorder (or browser ASR) → `/api/asr` → `/api/llm[/stream]`
+  (+ tool round-trip) → `/api/tts` → Web Audio queue playback. Endpoint
+  silence and TTS pre-buffer are both sliders.
+- **Barge-in:** an echo-aware double-talk detector (estimates how much of the
+  mic signal is our own TTS output echoing back, flags the residual as user
+  speech) with off/low/medium/high sensitivity presets; interrupting appends
+  `[cancelled by the user]` to that turn instead of dropping it from history.
+- **Latency pie** (**time-to-first-audio** breakdown: ASR/RAG/LLM/Tools/TTS/
+  buffer/other) plus a batch-vs-streaming TTFA comparison table.
+- The landing widget's mic button (`voice-widget.js`) instead uses the WS path
+  (`/api/ws` → `ws-client.js`): one click starts a continuous session, VAD
+  auto-detects each utterance boundary, no per-turn clicking — simpler, no
+  latency dashboard, meant for a quick always-on chat bubble rather than the
+  full pipeline-tuning page.
 
 ## Phase 5: Landing chatbox + deploy — done
 
 - `assets/voice-widget.js`: a floating "Talk to Nimbus" widget on the catalog
-  pages, using the same `localStorage` config as the playground, linking to
-  `playground/playground.html`.
+  pages. Reads keys/settings from the same `localStorage` scheme as the
+  playground (`nimbus_pg_keys`, `nimbus_pg_base`, `nimbus_agent_config`),
+  links to `playground/playground.html`.
 - Deployed: static site + `playground/` on **Vercel** (`.vercelignore` keeps
   the Python backend out of the build); backend on **Railway**
   (`railway.json`/`Procfile` install `backend/requirements-light.txt` and run
   `uvicorn backend.main:app` with `EMBEDDING_PROFILE=light` set in the
   dashboard). Default backend URL comes from `assets/runtime-config.js`
   (`window.NIMBUS_API_BASE`, edited once after deploy); anyone can still
-  override it per-browser via the playground's Keys page (`localStorage`).
+  override it per-browser via the playground's Keys dialog (`localStorage`).
 
 ---
 
-## Latency model (consistent everywhere)
+## Latency model
 
-Every WS turn ends with a `latency_report`:
+WS path: every turn ends with a `latency_report`
+(`{ "asr": 0, "rag": 0, "llm": 0, "tts": 0, "total": 0 }`).
 
-```json
-{ "asr": 0, "rag": 0, "llm": 0, "tts": 0, "total": 0 }
-```
-
-The **Talk** page shows this inline (`E2E / ASR / LLM / TTS`); the
-**Latency** tab charts it across turns.
+REST path: each response carries its own stage's latency (`/api/llm`'s
+`latency_ms`/`rag_latency_ms`, `/api/tts`'s `X-TTS-Ms` header); `voice.js` and
+`playground.js` combine these client-side into the same shape for their own
+latency pie / bar-chart / TTFA-comparison displays.
 
 ## Out of scope (explicit)
 

@@ -144,9 +144,9 @@ a Vercel function bundle anyway).
 
 ### Wiring frontend → backend in production
 
-`assets/runtime-config.js` sets `window.NIMBUS_API_BASE`, read by both the
-playground (`config-store.js`) and the landing-page widget
-(`voice-widget.js`) as their default backend URL — it's included on
+`assets/runtime-config.js` sets `window.NIMBUS_API_BASE`, read by the three
+playground pages (`playground.js`/`voice.js`/`rag.js`) and the landing-page
+widget (`voice-widget.js`) as their default backend URL — it's included on
 `index.html` and all three `playground/*.html` pages. After your first
 Railway deploy, edit that one file to your Railway URL:
 
