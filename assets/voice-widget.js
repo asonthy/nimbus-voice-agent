@@ -2,22 +2,28 @@
  * Floating voice agent widget for the Nimbus landing page.
  * Creates the .voice-fab button + .voice-panel drawer.
  * Uses WebSocket session with sensible defaults.
- * API keys are read from localStorage["nimbus_playground_config"] set via playground.
+ * API keys and settings are read from localStorage keys set by the
+ * playground pages: "nimbus_pg_keys" (API keys), "nimbus_pg_base"
+ * (backend URL), "nimbus_agent_config" (provider/model/knowledge/tools/etc).
  */
 
-const BACKEND = "http://localhost:8000";
+// Set by assets/runtime-config.js in production; falls back to localhost locally.
+const BACKEND =
+  typeof window !== "undefined" &&
+  window.NIMBUS_API_BASE &&
+  !window.NIMBUS_API_BASE.includes("REPLACE-ME")
+    ? window.NIMBUS_API_BASE
+    : "http://localhost:8000";
 const CART_KEY = "nimbus_cart";
 
-function getConfig() {
-  try {
-    const raw = localStorage.getItem("nimbus_playground_config");
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
+function getKeys() {
+  try { return JSON.parse(localStorage.getItem("nimbus_pg_keys") || "{}"); } catch { return {}; }
 }
-
-function getKey(cfg, ...keys) {
-  for (const k of keys) if (cfg[k]) return cfg[k];
-  return "";
+function getBackendUrl() {
+  return localStorage.getItem("nimbus_pg_base") || BACKEND;
+}
+function getAgentConfig() {
+  try { return JSON.parse(localStorage.getItem("nimbus_agent_config") || "{}"); } catch { return {}; }
 }
 
 function esc(s) {
@@ -60,14 +66,11 @@ function mount() {
   fab.addEventListener("click", () => panel.classList.toggle("open"));
   panel.querySelector("#vp-close").addEventListener("click", () => panel.classList.remove("open"));
 
-  const cfg = getConfig();
-  const openaiKey = getKey(cfg, "openaiKey");
-
   // Text send
   const textInp = panel.querySelector("#vp-text");
-  panel.querySelector("#vp-send").addEventListener("click", () => _sendText(panel, textInp, openaiKey));
+  panel.querySelector("#vp-send").addEventListener("click", () => _sendText(panel, textInp));
   textInp.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") _sendText(panel, textInp, openaiKey);
+    if (e.key === "Enter") _sendText(panel, textInp);
   });
 
   // Mic button — voice via WebSocket
@@ -75,19 +78,28 @@ function mount() {
   panel.querySelector("#vp-mic").addEventListener("click", async () => {
     if (!_session) {
       try {
+        const keys = getKeys();
+        const cfg = getAgentConfig();
         const { WsSession } = await import("./playground/ws-client.js");
         _session = new WsSession({
-          backendUrl: cfg.backendUrl || BACKEND,
+          backendUrl: getBackendUrl(),
           config: {
-            ...cfg,
-            asrProvider: cfg.asrProvider || "browser",
-            llmProvider: cfg.llmProvider || "openai",
-            llmModel: cfg.llmModel || "gpt-4o-mini",
-            ttsProvider: cfg.ttsProvider || "openai",
+            openaiKey: keys.openai || "",
+            googleKey: keys.gemini || "",
+            elevenLabsKey: keys.elevenlabs || "",
+            anthropicKey: keys.anthropic || "",
+            asrProvider: cfg.asr || "browser",
+            asrLanguage: "en-US",
+            llmProvider: cfg.provider || "openai",
+            llmModel: cfg.model || "gpt-4o-mini",
+            ttsProvider: cfg.tts || "openai",
+            ttsVoice: cfg.voice || "alloy",
             ragEnabled: false,
             toolsEnabled: ["get_cart_total", "add_to_cart", "get_cart_items", "get_pricing_annual", "calculate_savings"],
             llmHistoryN: 5,
-            llmSystemPrompt: cfg.llmSystemPrompt || "You are Nimbus Assistant, a helpful voice agent for the Nimbus cloud software suite. Be concise and friendly. Help users with products, pricing, and cart.",
+            llmSystemPrompt: cfg.system_prompt || "You are Nimbus Assistant, a helpful voice agent for the Nimbus cloud software suite. Be concise and friendly. Help users with products, pricing, and cart.",
+            vadEndpointMs: cfg.endpoint || 500,
+            vadSensitivity: 0.015,
           },
           onStateChange: (state) => {
             const status = panel.querySelector("#vp-status");
@@ -147,32 +159,34 @@ function _appendToken(panel, tok) {
   log.scrollTop = log.scrollHeight;
 }
 
-async function _sendText(panel, inp, openaiKey) {
+async function _sendText(panel, inp) {
   const text = inp.value.trim();
   if (!text) return;
   inp.value = "";
   _appendLog(panel, "You", text);
-  const cfg = getConfig();
+  const keys = getKeys();
+  const cfg = getAgentConfig();
 
   try {
-    const backendUrl = cfg.backendUrl || BACKEND;
-    const res = await fetch(`${backendUrl}/api/llm`, {
+    const res = await fetch(`${getBackendUrl()}/api/llm`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-OpenAI-Key": getKey(cfg, "openaiKey"),
-        "X-Google-Key": getKey(cfg, "googleKey"),
-        "X-Anthropic-Key": getKey(cfg, "anthropicKey"),
+        "X-OpenAI-Key": keys.openai || "",
+        "X-Google-Key": keys.gemini || "",
+        "X-Anthropic-Key": keys.anthropic || "",
       },
       body: JSON.stringify({
         messages: [{ role: "user", content: text }],
-        provider: cfg.llmProvider || "openai",
-        model: cfg.llmModel || "gpt-4o-mini",
-        system_prompt: cfg.llmSystemPrompt || "You are Nimbus Assistant. Be concise and helpful.",
-        response_length: cfg.llmResponseLength || "medium",
-        use_rag: cfg.ragEnabled ?? false,
-        top_k: cfg.ragTopK || 5,
-        streaming: false,
+        provider: cfg.provider || "openai",
+        model: cfg.model || "gpt-4o-mini",
+        system_prompt: cfg.system_prompt || "You are Nimbus Assistant. Be concise and helpful.",
+        response_length: cfg.response_length || "medium",
+        use_rag: cfg.knowledge === "rag",
+        use_context: cfg.knowledge === "ragless",
+        top_k: cfg.top_k || 5,
+        rerank: cfg.rerank || false,
+        temperature: cfg.temperature ?? 0.7,
       }),
     });
     const data = await res.json();
